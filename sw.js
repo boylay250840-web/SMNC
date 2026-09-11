@@ -1,8 +1,9 @@
-const CACHE_NAME = "smnc-workforce-v1";
+const CACHE_NAME = "smnc-workforce-v2";
 const SHELL_FILES = [
   "./",
   "./index.html",
   "./app.jsx",
+  "./firebase-config.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",

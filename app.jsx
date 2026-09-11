@@ -1,5 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import ReactDOM from "react-dom/client";
+import { initializeApp } from "firebase/app";
+import {
+  getFirestore, doc, onSnapshot, setDoc,
+} from "firebase/firestore";
+import { firebaseConfig } from "./firebase-config.js";
 import {
   Home as HomeIcon, Users, MessageCircle, Clock, Settings as SettingsIcon,
   Search, Plus, X, Phone, Pencil, Trash2, Check, XCircle, ChevronLeft,
@@ -140,6 +145,58 @@ const S = {
   startChat: { en: "Message", my: "Chat ပို့မည်" },
 };
 const useT = (lang) => (key) => (S[key] ? S[key][lang] : key);
+
+/* ---------------------------------- FIREBASE (shared live data) ---------------------------------- */
+// Every phone/browser that opens this app reads & writes the SAME Firestore
+// document per data type below, so employees/leave/attendance/announcements/
+// chat all sync live across devices. See firebase-config.js for setup.
+let db = null;
+try {
+  const fbApp = initializeApp(firebaseConfig);
+  db = getFirestore(fbApp);
+} catch (e) {
+  console.warn("Firebase not configured yet — running in local-only mode.", e);
+}
+
+// Mirrors a whole local state slice to a single Firestore doc (doc id = key)
+// and keeps it live-synced both ways, without changing any component below.
+function useFirestoreSync(key, state, setState) {
+  const remoteRef = useRef(undefined);
+  const loadedRef = useRef(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  useEffect(() => {
+    if (!db) return;
+    const ref = doc(db, "smnc-app", key);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          const remoteData = snap.data().data;
+          remoteRef.current = remoteData;
+          setState(remoteData);
+        } else {
+          // First run ever — seed Firestore with the local starter data.
+          remoteRef.current = stateRef.current;
+          setDoc(ref, { data: stateRef.current, updatedAt: Date.now() }).catch(() => {});
+        }
+        loadedRef.current = true;
+      },
+      (err) => console.warn(`Firestore sync (${key}) error:`, err)
+    );
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  useEffect(() => {
+    if (!db || !loadedRef.current) return;
+    if (JSON.stringify(remoteRef.current) === JSON.stringify(state)) return;
+    remoteRef.current = state;
+    setDoc(doc(db, "smnc-app", key), { data: state, updatedAt: Date.now() }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+}
 
 /* ---------------------------------- MOCK DATA ---------------------------------- */
 const initialEmployees = [
@@ -1242,6 +1299,13 @@ export default function App() {
   const [attendance, setAttendance] = useState(initialAttendance);
   const [teamChats, setTeamChats] = useState(initialTeamChats);
   const [privateChats, setPrivateChats] = useState(initialPrivateChats);
+
+  useFirestoreSync("employees", employees, setEmployees);
+  useFirestoreSync("leave", leave, setLeave);
+  useFirestoreSync("announcements", announcements, setAnnouncements);
+  useFirestoreSync("attendance", attendance, setAttendance);
+  useFirestoreSync("teamChats", teamChats, setTeamChats);
+  useFirestoreSync("privateChats", privateChats, setPrivateChats);
 
   const t = useT(lang);
   const me = employees.find((e) => e.id === meId) || employees[0];
